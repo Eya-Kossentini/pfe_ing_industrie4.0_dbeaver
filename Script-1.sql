@@ -1,11 +1,11 @@
-CREATE DATABASE staging_momes;
-
-
-SELECT datname FROM pg_database;
-
-CREATE SCHEMA staging;
-
+-- ============================================================
+-- 1. SCHEMAS
+-- ============================================================
 CREATE SCHEMA IF NOT EXISTS staging;
+
+-- ============================================================
+-- 2. TABLES STAGING (ordre respectant les FK)
+-- ============================================================
 
 CREATE TABLE IF NOT EXISTS staging.clients (
     id BIGINT PRIMARY KEY,
@@ -26,29 +26,27 @@ CREATE TABLE IF NOT EXISTS staging.company_codes (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.sites (
-    id                      BIGINT PRIMARY key,
-    user_id                 INT,
-    company_code_id         INT,
-    site_number             VARCHAR,
-    site_external_number    VARCHAR,
-    deletion_priority       VARCHAR,
-    geo_coordinates         VARCHAR,
-    description             VARCHAR,
-    created_at TIMESTAMP DEFAULT NOW()
-); 
-
+    id BIGINT PRIMARY KEY,
+    user_id INT,
+    company_code_id INT,
+    site_number VARCHAR,
+    site_external_number VARCHAR,
+    deletion_priority VARCHAR,
+    geo_coordinates VARCHAR,
+    description VARCHAR,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS staging.cells (
-    id                BIGINT PRIMARY KEY,
-    name              TEXT NOT NULL,
-    description       TEXT,
-    site_id                 BIGINT NOT NULL REFERENCES staging.sites(id),
-    user_id                 INT,
-    info                    TEXT,
-    is_active               BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW(),
+    id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    site_id BIGINT NOT NULL REFERENCES staging.sites(id),
+    user_id INT,
+    info TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -56,39 +54,35 @@ CREATE TABLE IF NOT EXISTS staging.machine_groups (
     id BIGINT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    user_id BIGINT NOT NULL,       
-    cell_id BIGINT,              
+    user_id BIGINT NOT NULL,
+    cell_id BIGINT,
     is_active BOOLEAN DEFAULT TRUE,
-    failure BOOLEAN DEFAULT FALSE, 
+    failure BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-
-
 CREATE TABLE IF NOT EXISTS staging.stations (
-    id               BIGINT PRIMARY KEY,
-    machine_group_id         BIGINT REFERENCES staging.machine_groups(id),
-    name             TEXT NOT NULL,
-    description      TEXT NOT NULL,
-    is_active                BOOLEAN DEFAULT TRUE,
-    user_id                  BIGINT NOT NULL,
-    info                   TEXT,
-    created_at               TIMESTAMPTZ DEFAULT now(),
-    updated_at               TIMESTAMPTZ DEFAULT now()
+    id BIGINT PRIMARY KEY,
+    machine_group_id BIGINT REFERENCES staging.machine_groups(id),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    user_id BIGINT NOT NULL,
+    info TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.lines (
     id BIGINT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    date TIMESTAMPTZ,   
+    date TIMESTAMPTZ,
     user_id BIGINT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.line_stations (
     line_id BIGINT REFERENCES staging.lines(id) ON DELETE CASCADE,
@@ -96,17 +90,7 @@ CREATE TABLE IF NOT EXISTS staging.line_stations (
     PRIMARY KEY (line_id, station_id)
 );
 
-CREATE TABLE IF NOT EXISTS staging.part_types(
-    id BIGINT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    user_id BIGINT NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT now()   
-);
-
-create table if not exists staging.part_group_types(
+CREATE TABLE IF NOT EXISTS staging.part_group_types (
     id BIGINT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
@@ -114,13 +98,22 @@ create table if not exists staging.part_group_types(
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS staging.part_types (
+    id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    user_id BIGINT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ
+);
 
 CREATE TABLE IF NOT EXISTS staging.part_groups (
     id BIGINT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     user_id BIGINT NOT NULL,
-    part_type TEXT,             
+    part_type TEXT,
     part_group_type_id BIGINT REFERENCES staging.part_group_types(id),
     costs NUMERIC(12,2) DEFAULT 0,
     circulating_lot INT DEFAULT 0,
@@ -160,26 +153,23 @@ CREATE TABLE IF NOT EXISTS staging.part_master (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.failure_group_types (
-    id    BIGINT PRIMARY KEY,
-    failure_group_name       TEXT NOT NULL,
-    failure_group_desc       TEXT NOT NULL,
-    created_at               TIMESTAMPTZ DEFAULT now(),
-    updated_at               TIMESTAMPTZ DEFAULT now()
+    id BIGINT PRIMARY KEY,
+    failure_group_name TEXT NOT NULL,
+    failure_group_desc TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.failure_types (
-    failure_type_id          BIGINT PRIMARY KEY,
-    failure_type_code        TEXT NOT NULL,
-    failure_type_desc        TEXT NOT NULL,
-    site_id                  BIGINT REFERENCES staging.sites(id),
-    failure_group_id         BIGINT REFERENCES staging.failure_group_types(id),
-    created_at               TIMESTAMPTZ DEFAULT now(),
-    updated_at               TIMESTAMPTZ DEFAULT now()
+    failure_type_id BIGINT PRIMARY KEY,
+    failure_type_code TEXT NOT NULL,
+    failure_type_desc TEXT NOT NULL,
+    site_id BIGINT REFERENCES staging.sites(id),
+    failure_group_id BIGINT REFERENCES staging.failure_group_types(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.machine_condition_groups (
     id BIGINT PRIMARY KEY,
@@ -189,7 +179,6 @@ CREATE TABLE IF NOT EXISTS staging.machine_condition_groups (
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.machine_conditions (
     id BIGINT PRIMARY KEY,
@@ -201,7 +190,6 @@ CREATE TABLE IF NOT EXISTS staging.machine_conditions (
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.erp_groups (
     id BIGINT PRIMARY KEY,
@@ -220,7 +208,6 @@ CREATE TABLE IF NOT EXISTS staging.erp_groups (
     valid BOOLEAN DEFAULT TRUE
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.assign_stations_to_erpgrp (
     station_id BIGINT REFERENCES staging.stations(id),
     erp_group_id BIGINT REFERENCES staging.erp_groups(id),
@@ -228,9 +215,6 @@ CREATE TABLE IF NOT EXISTS staging.assign_stations_to_erpgrp (
     user_id BIGINT,
     PRIMARY KEY (station_id, erp_group_id)
 );
-
-
-
 
 CREATE TABLE IF NOT EXISTS staging.workplans (
     id BIGINT PRIMARY KEY,
@@ -253,6 +237,14 @@ CREATE TABLE IF NOT EXISTS staging.workplans (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS staging.workplan_types (
+    id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS staging.worksteps (
     id BIGINT PRIMARY KEY,
@@ -285,21 +277,6 @@ CREATE TABLE IF NOT EXISTS staging.worksteps (
     stamp TIMESTAMPTZ
 );
 
-
-
-
-CREATE TABLE IF NOT EXISTS staging.workplan_types (
-    id BIGINT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-
-select * from staging.workplan_types ;
-
 CREATE TABLE IF NOT EXISTS staging.bom_headers (
     id BIGINT PRIMARY KEY,
     description TEXT,
@@ -315,7 +292,6 @@ CREATE TABLE IF NOT EXISTS staging.bom_headers (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.bom_items (
     id BIGSERIAL PRIMARY KEY,
     bom_header_id BIGINT REFERENCES staging.bom_headers(id),
@@ -327,44 +303,40 @@ CREATE TABLE IF NOT EXISTS staging.bom_items (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-
-
 CREATE TABLE IF NOT EXISTS staging.work_orders (
-    id                 BIGINT PRIMARY KEY,
-    workorder_no                 TEXT NOT NULL,
-    workorder_type               TEXT NOT NULL,
-    part_number                  TEXT NOT NULL,
-    workorder_qty                NUMERIC(14,3),
-    startdate                    TIMESTAMPTZ,
-    deliverydate                 TIMESTAMPTZ,
-    unit                         TEXT,
-    bom_version                  INT,
-    workplan_type                TEXT NOT NULL,
-    backflush                    INT,
-    source                       INT,
-    workplan_version             INT,
-    workorder_desc               TEXT NOT NULL,
-    workplan_valid_from          TIMESTAMPTZ,
-    status                       TEXT NOT NULL,
-    site_id                      BIGINT REFERENCES staging.sites(id),
-    client_id                    INT NOT NULL,
-    company_id                   BIGINT NOT NULL REFERENCES staging.company_codes(id),
-    workorder_state              TEXT,
-    aps_planning_start_date      TIMESTAMPTZ,
-    aps_planning_stamp           TIMESTAMPTZ,
-    aps_planning_end_date        TIMESTAMPTZ,
-    aps_order_fixation           INT,
-    created_at TIMESTAMP DEFAULT NOW()
+    id BIGINT PRIMARY KEY,
+    workorder_no TEXT NOT NULL,
+    workorder_type TEXT NOT NULL,
+    part_number TEXT NOT NULL,
+    workorder_qty NUMERIC(14,3),
+    startdate TIMESTAMPTZ,
+    deliverydate TIMESTAMPTZ,
+    unit TEXT,
+    bom_version INT,
+    workplan_type TEXT NOT NULL,
+    backflush INT,
+    source INT,
+    workplan_version INT,
+    workorder_desc TEXT NOT NULL,
+    workplan_valid_from TIMESTAMPTZ,
+    status TEXT NOT NULL,
+    site_id BIGINT REFERENCES staging.sites(id),
+    client_id INT NOT NULL,
+    company_id BIGINT NOT NULL REFERENCES staging.company_codes(id),
+    workorder_state TEXT,
+    aps_planning_start_date TIMESTAMPTZ,
+    aps_planning_stamp TIMESTAMPTZ,
+    aps_planning_end_date TIMESTAMPTZ,
+    aps_order_fixation INT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-
 
 CREATE TABLE IF NOT EXISTS staging.serial_numbers (
     id BIGINT PRIMARY KEY,
     serial_number TEXT NOT NULL,
     serial_number_pos INT,
     serial_number_ref_pos INT,
-    serial_number_active CHAR(1), 
+    serial_number_active CHAR(1),
     serial_number_ref TEXT,
     splitted BOOLEAN DEFAULT FALSE,
     workorder_id BIGINT NOT NULL REFERENCES staging.work_orders(id),
@@ -380,17 +352,15 @@ CREATE TABLE IF NOT EXISTS staging.serial_numbers (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.active_workorders (
-    id      BIGINT PRIMARY KEY,
-    workorder_id              BIGINT NOT NULL REFERENCES staging.work_orders(id),
-    station_id                BIGINT NOT NULL REFERENCES staging.stations(id),
-    state                     INT NOT NULL,
+    id BIGINT PRIMARY KEY,
+    workorder_id BIGINT NOT NULL REFERENCES staging.work_orders(id),
+    station_id BIGINT NOT NULL REFERENCES staging.stations(id),
+    state INT NOT NULL,
     process_layer INT,
-    created_at                TIMESTAMPTZ DEFAULT now(),
-    updated_at                TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.bookings (
     id BIGINT PRIMARY KEY,
@@ -410,7 +380,6 @@ CREATE TABLE IF NOT EXISTS staging.bookings (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-
 CREATE TABLE IF NOT EXISTS staging.measurement_data (
     id BIGINT PRIMARY KEY,
     station_id BIGINT REFERENCES staging.stations(id),
@@ -427,7 +396,6 @@ CREATE TABLE IF NOT EXISTS staging.measurement_data (
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
-
 
 CREATE TABLE IF NOT EXISTS staging.machine_condition_data (
     id BIGINT PRIMARY KEY,
@@ -454,140 +422,76 @@ CREATE TABLE IF NOT EXISTS staging.part_number_map (
     site_id INTEGER,
     unit_id INTEGER,
     customer_material_number TEXT,
-    created_at TIMESTAMP DEFAULT now(),
-    updated_at TIMESTAMP DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- ============================================================
+-- 3. TABLES PUBLIC KPI
+-- ============================================================
 
-SELECT *
-FROM staging.company_codes
-ORDER BY id DESC;
+CREATE TABLE IF NOT EXISTS public.reliability_diagnostic_kpi (
+    station_id INT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    mtbf_hours NUMERIC(10,2),
+    top_loss_pct NUMERIC(10,2),
+    criticality_level TEXT,
+    PRIMARY KEY (station_id, timestamp)
+);
 
+CREATE TABLE IF NOT EXISTS public.defect_rate_kpi (
+    station_id INT NOT NULL,
+    station_name VARCHAR(255),
+    total_bookings INT,
+    good_count INT,
+    fail_count INT,
+    scrap_count INT,
+    defect_count INT,
+    defect_rate_pct NUMERIC(10,2),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (station_id, created_at)
+);
 
-SELECT *
-FROM staging.clients
-ORDER BY id DESC;
+-- ============================================================
+-- 4. FONCTION REFRESH TIMESTAMPS (pour Grafana)
+-- ============================================================
 
-SELECT *
-FROM staging.sites
-ORDER BY id DESC;
+CREATE OR REPLACE FUNCTION public.refresh_all_kpi_timestamps()
+RETURNS void AS $$
+BEGIN
+    WITH ranked AS (
+        SELECT ctid, ROW_NUMBER() OVER (ORDER BY station_id) AS rn
+        FROM public.reliability_diagnostic_kpi
+    )
+    UPDATE public.reliability_diagnostic_kpi t
+    SET timestamp = NOW() - (ranked.rn * INTERVAL '10 minutes')
+    FROM ranked WHERE t.ctid = ranked.ctid;
 
-SELECT *
-FROM staging.cells
-ORDER BY id DESC;
+    WITH ranked AS (
+        SELECT ctid, ROW_NUMBER() OVER (ORDER BY station_id) AS rn
+        FROM public.defect_rate_kpi
+    )
+    UPDATE public.defect_rate_kpi t
+    SET created_at = NOW() - (ranked.rn * INTERVAL '10 minutes')
+    FROM ranked WHERE t.ctid = ranked.ctid;
 
-SELECT *
-FROM staging.machine_groups
-ORDER BY id DESC;
+    RAISE NOTICE 'Timestamps rafraîchis à %', NOW();
+END;
+$$ LANGUAGE plpgsql;
 
-SELECT *
-FROM staging.stations
-ORDER BY id DESC;
+-- ============================================================
+-- 5. REMPLIR station_name depuis staging.stations
+-- ============================================================
 
+UPDATE public.defect_rate_kpi d
+SET station_name = s.name
+FROM staging.stations s
+WHERE d.station_id = s.id;
 
+-- ============================================================
+-- 6. LANCER LE REFRESH
+-- ============================================================
 
-SELECT *
-FROM staging.lines
-ORDER BY id DESC;
+SELECT public.refresh_all_kpi_timestamps();
 
-SELECT *
-FROM staging.line_stations ls ;
-
-
-SELECT *
-FROM staging.part_group_types pgt  ;
-
-
-SELECT *
-FROM staging.part_groups pg ;
-
-SELECT *
-FROM staging.part_types pt ;
-
-
-SELECT *
-FROM staging.part_number_map pnm  ;
-
-SELECT *
-FROM staging.failure_group_types fgt   ;
-
-SELECT *
-FROM staging.failure_types ft  ;
-
-
-SELECT *
-FROM staging.machine_condition_groups mcg ;
-
-SELECT *
-FROM staging.machine_conditions mc  ;
-
-SELECT *
-FROM staging.erp_groups eg   ;
-
-select * from staging.assign_stations_to_erpgrp aste ;
-
-select * from staging.workplans w ;
-
-
-select * from staging.worksteps w2  ;
-
-select * from staging.work_orders wo   ;
-
-select * from staging.serial_numbers sn  ;
-
-select * from staging.active_workorders aw   ;
-
-select * from staging.bookings b  ;
-
-select * from staging.measurement_data md   ;
-
-select * from staging.machine_condition_data mcd   ;
-
-
-select * from public.reliability_diagnostic_kpi rdk ;
-
-SELECT *
-FROM public.reliability_diagnostic_kpi
-WHERE criticality_level = 'MEDIUM'
-
-
-ALTER TABLE reliability_diagnostic_kpi 
-ADD COLUMN timestamp TIMESTAMP;
-
-WITH ranked AS (
-  SELECT
-    ctid,
-    ROW_NUMBER() OVER (ORDER BY station_id) AS rn
-  FROM public.reliability_diagnostic_kpi
-)
-UPDATE public.reliability_diagnostic_kpi t
-SET timestamp = NOW() - (ranked.rn * INTERVAL '10 minutes')
-FROM ranked
-WHERE t.ctid = ranked.ctid;
-
-SELECT
-  timestamp AS "time",
-  station_id::text AS metric,
-  COALESCE(mtbf_hours, 0) AS mtbf_hours,
-  COALESCE(top_loss_pct, 0) AS top_loss_pct
-FROM public.reliability_diagnostic_kpi
-WHERE timestamp BETWEEN NOW() - INTERVAL '1 day' AND NOW()
-ORDER BY timestamp;
-
-ALTER TABLE reliability_diagnostic_kpi
-DROP CONSTRAINT reliability_diagnostic_kpi_pkey;
-
-ALTER TABLE reliability_diagnostic_kpi
-ADD PRIMARY KEY (station_id, timestamp);
-
-INSERT INTO reliability_diagnostic_kpi (station_id, timestamp, top_loss_pct)
-SELECT
-  station_id,
-  NOW() - (g * INTERVAL '1 hour'),
-  60 + random() * 40
-FROM generate_series(1, 24) g,
-     (SELECT DISTINCT station_id FROM reliability_diagnostic_kpi) s;
-
-
-select * from public.defect_rate_kpi drk ;
 
