@@ -495,3 +495,181 @@ WHERE d.station_id = s.id;
 SELECT public.refresh_all_kpi_timestamps();
 
 
+
+SELECT AVG(oee_pct) AS "OEE Global"
+FROM public.dashboard_overview;
+
+
+
+ALTER TABLE reliability_diagnostic_kpi
+ADD COLUMN station_name VARCHAR(255);
+
+UPDATE reliability_diagnostic_kpi r
+SET station_name = s.name
+FROM staging.stations s
+WHERE r.station_id = s.id;
+
+
+ALTER TABLE reliability_diagnostic_kpi
+ADD COLUMN production_day TIMESTAMP;
+
+UPDATE reliability_diagnostic_kpi
+SET production_day = timestamp 
+    + (random() * interval '59 minutes')
+    + (random() * interval '59 seconds');
+
+SELECT *
+FROM public.reliability_diagnostic_kpi rdk ;
+
+
+
+
+ALTER TABLE mttr_kpi
+ADD COLUMN station_name VARCHAR(255);
+
+UPDATE mttr_kpi r
+SET station_name = s.name
+FROM staging.stations s
+WHERE r.station_id = s.id;
+
+ALTER TABLE mttr_kpi
+ADD COLUMN production_day TIMESTAMP;
+
+
+UPDATE mttr_kpi
+SET production_day = timestamp 
+    + (random() * interval '59 minutes')
+    + (random() * interval '59 seconds');
+
+SELECT production_day, COUNT(*) 
+FROM mttr_kpi 
+GROUP BY production_day 
+ORDER BY production_day 
+LIMIT 10;
+
+WITH numbered AS (
+  SELECT ctid, ROW_NUMBER() OVER () AS rn
+  FROM mttr_kpi
+)
+UPDATE mttr_kpi m
+SET production_day = '2025-06-01'::timestamp 
+    + (n.rn || ' months')::interval
+    + (random() * interval '28 days')
+    + (random() * interval '24 hours')
+FROM numbered n
+WHERE m.ctid = n.ctid;
+
+
+SELECT *
+FROM public.mttr_kpi mk  ;
+
+
+select * from quality_kpi;
+
+SELECT MIN(oee_pct), MAX(oee_pct), AVG(oee_pct) 
+FROM dashboard_overview;
+
+SELECT MIN(availability_pct), MAX(availability_pct), AVG(availability_pct) 
+FROM availability_kpi;
+
+SELECT 
+  COUNT(*) AS total,
+  COUNT(CASE WHEN oee_pct = 0 THEN 1 END) AS zeros,
+  COUNT(CASE WHEN oee_pct BETWEEN 0.01 AND 10 THEN 1 END) AS tres_bas,
+  COUNT(CASE WHEN oee_pct BETWEEN 10 AND 50 THEN 1 END) AS bas,
+  COUNT(CASE WHEN oee_pct BETWEEN 50 AND 85 THEN 1 END) AS normaux,
+  COUNT(CASE WHEN oee_pct > 85 THEN 1 END) AS excellents
+FROM dashboard_overview;
+
+
+SELECT station_name, COUNT(*) AS nb_lignes, 
+       MIN(oee_pct), MAX(oee_pct), AVG(oee_pct) AS oee_moyen
+FROM dashboard_overview
+GROUP BY station_name
+ORDER BY oee_moyen DESC;
+
+
+SELECT 'sites' AS tbl, COUNT(*) FROM staging.sites
+UNION ALL SELECT 'lines', COUNT(*) FROM staging.lines
+UNION ALL SELECT 'stations', COUNT(*) FROM staging.stations
+UNION ALL SELECT 'machine_groups', COUNT(*) FROM staging.machine_groups
+UNION ALL SELECT 'work_orders', COUNT(*) FROM staging.work_orders
+UNION ALL SELECT 'active_workorders', COUNT(*) FROM staging.active_workorders
+UNION ALL SELECT 'bookings', COUNT(*) FROM staging.bookings
+UNION ALL SELECT 'serial_numbers', COUNT(*) FROM staging.serial_numbers
+UNION ALL SELECT 'failure_types', COUNT(*) FROM staging.failure_types
+UNION ALL SELECT 'machine_condition_data', COUNT(*) FROM staging.machine_condition_data
+UNION ALL SELECT 'measurement_data', COUNT(*) FROM staging.measurement_data
+ORDER BY tbl;
+
+
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_schema = 'staging' AND table_name = 'bookings'
+ORDER BY ordinal_position;
+
+SELECT * FROM staging.bookings LIMIT 5;
+
+
+SELECT trigger_name, event_object_schema, event_object_table, action_timing, event_manipulation
+FROM information_schema.triggers
+WHERE event_object_schema IN ('staging', 'public');
+
+SELECT routine_schema, routine_name, routine_type
+FROM information_schema.routines
+WHERE routine_schema IN ('staging', 'public')
+ORDER BY routine_schema, routine_name;
+
+SELECT schemaname, matviewname FROM pg_matviews;
+
+SELECT 
+  DATE_TRUNC('month', created_at) AS mois,
+  COUNT(*) AS nb_bookings
+FROM staging.bookings
+GROUP BY DATE_TRUNC('month', created_at)
+ORDER BY mois;
+
+
+SELECT pg_get_functiondef(p.oid) AS definition
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE n.nspname = 'public' 
+  AND p.proname = 'refresh_all_kpi_timestamps';
+
+SELECT public.refresh_all_kpi_timestamps();
+
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_schema = 'staging' AND table_name = 'machine_condition_data'
+ORDER BY ordinal_position;
+
+
+SELECT * FROM staging.machine_condition_data LIMIT 5;
+
+
+SELECT 
+  DATE_TRUNC('month', created_at) AS mois,
+  COUNT(*) AS nb
+FROM staging.machine_condition_data
+GROUP BY DATE_TRUNC('month', created_at)
+ORDER BY mois;
+
+
+SELECT * FROM timescaledb_information.jobs;
+
+SELECT 
+  mc.id,
+  mc.condition_name,
+  mc.condition_description,
+  mc.group_id,
+  mc.color_rgb
+FROM staging.machine_conditions mc
+ORDER BY mc.id;
+
+
+SELECT mc.id, mc.condition_name, COUNT(mcd.id) AS nb_events
+FROM staging.machine_conditions mc
+LEFT JOIN staging.machine_condition_data mcd ON mcd.condition_id = mc.id
+WHERE mc.id NOT BETWEEN 17 AND 26  -- on garde seulement la vague 2 (ALLOWED_CONDITIONS)
+GROUP BY mc.id, mc.condition_name
+ORDER BY mc.id;
