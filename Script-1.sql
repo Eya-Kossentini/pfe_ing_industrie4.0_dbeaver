@@ -496,6 +496,11 @@ SELECT public.refresh_all_kpi_timestamps();
 
 
 
+-- ============================================================
+-- 7. UPDATES
+-- ============================================================
+
+
 SELECT AVG(oee_pct) AS "OEE Global"
 FROM public.dashboard_overview;
 
@@ -522,10 +527,9 @@ SELECT *
 FROM public.reliability_diagnostic_kpi rdk ;
 
 
-
-
 ALTER TABLE mttr_kpi
 ADD COLUMN station_name VARCHAR(255);
+
 
 UPDATE mttr_kpi r
 SET station_name = s.name
@@ -673,3 +677,180 @@ LEFT JOIN staging.machine_condition_data mcd ON mcd.condition_id = mc.id
 WHERE mc.id NOT BETWEEN 17 AND 26  -- on garde seulement la vague 2 (ALLOWED_CONDITIONS)
 GROUP BY mc.id, mc.condition_name
 ORDER BY mc.id;
+
+
+
+
+UPDATE staging.machine_conditions
+SET condition_description = CASE condition_name
+	WHEN '106' THEN 'Idle'
+    WHEN '1000' THEN 'Running'
+    WHEN '1001' THEN 'Waiting'
+    WHEN '1002' THEN 'Cooling phase during molding'
+    when '1003' THEN 'Micro Stop'
+    WHEN '1012' THEN 'Repair'
+    WHEN '2000' THEN 'Breakdown'
+    WHEN '2002' THEN 'Calibration'
+    WHEN '3001' THEN 'Material Check'
+    WHEN '5001' THEN 'Cleaning'
+    WHEN '6001' THEN 'Setup'
+    WHEN '7001' THEN 'Meating'
+    ELSE condition_description
+END,
+updated_at = NOW()
+WHERE condition_name IN (
+    '106', '1000','1001','1002', '1003', '1012',
+    '2000','2002','3001', '5001','6001', '7001'
+);
+
+select * from staging.machine_conditions;
+
+UPDATE staging.machine_conditions
+SET
+    condition_name = CASE
+        WHEN condition_name LIKE 'GEN-3006-%' THEN '1000'
+        WHEN condition_name LIKE 'GEN-1000-%' THEN '1003'
+        WHEN condition_name LIKE 'GEN-1001-%' THEN '5001'
+        WHEN condition_name LIKE 'GEN-2000-%' THEN '6001'
+        WHEN condition_name LIKE 'GEN-2002-%' THEN '2000'
+        WHEN condition_name LIKE 'GEN-3000-%' THEN '8001'
+        ELSE condition_name
+    END,
+    condition_description = CASE
+        WHEN condition_name LIKE 'GEN-3006-%' THEN 'Running'
+        WHEN condition_name LIKE 'GEN-1000-%' THEN 'Micro Stop'
+        WHEN condition_name LIKE 'GEN-1001-%' THEN 'Cleaning'
+        WHEN condition_name LIKE 'GEN-2000-%' THEN 'Setup'
+        WHEN condition_name LIKE 'GEN-2002-%' THEN 'Breakdown'
+        WHEN condition_name LIKE 'GEN-3000-%' THEN 'Preventive Maintenance'
+        ELSE condition_description
+    END,
+    updated_at = NOW()
+WHERE condition_name LIKE 'GEN-%';
+
+
+UPDATE staging.machine_conditions
+SET
+    condition_name = CASE
+        WHEN condition_name LIKE '8001' THEN '3100'
+        ELSE condition_name
+    END,
+    updated_at = NOW()
+WHERE condition_name LIKE '8001';
+
+UPDATE staging.machine_conditions
+SET
+    group_id= '#e6d628 ',
+    updated_at = NOW()
+WHERE condition_description  = 'Preventive Maintenance';
+
+
+UPDATE staging.machine_conditions
+SET group_id = case
+	-- operationnel
+    WHEN condition_name IN ('1000', '1001', '1002', '1200', '1003')
+        THEN 6
+    -- unplanned downtime
+    WHEN condition_name IN ('1012', '2000', '2100')
+        THEN 4
+    -- planned downtime
+    WHEN condition_name IN ('2002','3000', '3001', '3002' , '3100', '3003', '3005', '6001', '5001', '3004')
+        THEN 5
+END;
+
+
+
+UPDATE staging.machine_condition_groups
+SET
+    group_name = CASE
+        WHEN id = 4 THEN 'Unplanned Downtime'
+        WHEN id = 5 THEN 'Planned Downtime'
+        WHEN id = 6 THEN 'Operational'
+        ELSE group_name
+    END,
+    group_description = CASE
+        WHEN id = 4 THEN 'Breakdowns, repairs, part shortage'
+        WHEN id = 5 THEN 'Setup, cleaning, calibration, preventive maintenance, Trial & Pilot Run, Material Check, Inventory Check, Fire Drills, Meeting, No Production & Break '
+        WHEN id = 6 THEN 'Running, waiting, micro stop, rate deviation, Cooling phase during molding'
+        ELSE group_description
+    END,
+    updated_at = NOW()
+WHERE id IN (4,5,6);
+
+select * from staging.machine_condition_groups mcg ;
+
+select * from staging.machine_condition_data mcd  ;
+
+
+select * from public.reliability_diagnostic_kpi rdk ;
+
+
+SELECT *
+FROM public.performance_kpi;
+
+select * from staging.bookings b ;
+
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_schema = 'public' AND table_name = 'oee_kpi'
+ORDER BY ordinal_position;
+
+SELECT * FROM public.oee_kpi 
+WHERE oee_pct > 0
+ORDER BY production_day DESC
+LIMIT 10;
+
+SELECT 
+  COUNT(*) AS total,
+  COUNT(*) FILTER (WHERE oee_pct > 0 
+                    AND availability_pct > 0 
+                    AND performance_pct > 0 
+                    AND quality_pct > 0) AS toutes_completes,
+  COUNT(DISTINCT station_name) AS stations,
+  COUNT(DISTINCT production_day) AS jours,
+  MIN(production_day) AS premier_jour,
+  MAX(production_day) AS dernier_jour
+FROM public.oee_kpi;
+
+-- 10 stations avec MCD , 1000 total events
+
+SELECT 
+  COUNT(DISTINCT station_id) AS stations_avec_mcd,
+  COUNT(*) AS total_events,
+  MIN(date_from) AS premier,
+  MAX(date_to) AS dernier
+FROM staging.machine_condition_data;
+
+SELECT COUNT(DISTINCT b.station_id) AS stations_a_couvrir
+FROM staging.bookings b
+WHERE NOT EXISTS (
+  SELECT 1 FROM staging.machine_condition_data mcd
+  WHERE mcd.station_id = b.station_id
+);
+--74
+
+
+
+-- Combien de MCD et bookings ont été créés ?
+SELECT 
+  (SELECT COUNT(*) FROM staging.machine_condition_data) AS mcd_count,
+  (SELECT COUNT(DISTINCT station_id) FROM staging.machine_condition_data) AS mcd_stations,
+  (SELECT COUNT(*) FROM staging.bookings) AS bookings_count,
+  (SELECT COUNT(DISTINCT station_id) FROM staging.bookings) AS bookings_stations,
+  (SELECT COUNT(*) FROM staging.measurement_data) AS measurements_count;
+
+select * from staging.bookings;
+
+SELECT DATE(date_of_booking), station_id, COUNT(*)
+FROM staging.bookings
+GROUP BY 1,2
+ORDER BY 1,2;
+
+SELECT DATE(date_from), station_id, COUNT(*)
+FROM staging.machine_condition_data
+GROUP BY 1,2
+ORDER BY 1,2;
+
+select * from staging.machine_condition_data;
+
+select * from staging.bookings b ;
