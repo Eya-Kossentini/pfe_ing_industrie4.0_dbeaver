@@ -1245,3 +1245,421 @@ WITH ranked AS (
 SELECT
     CONCAT('🚨 Main issue: ', downtime_type, ' — ', ROUND(total_hours::numeric * 60, 0), ' min') AS alert
 FROM ranked;
+
+
+
+-- =====================================================================
+--  NETTOYAGE DES failure_types ORPHELINS
+--  Constat reel :
+--   - failure_group_types est DEJA propre (aucun groupe GEN-)
+--   - Le probleme = ~45 failure_types dont le failure_group_id pointe
+--     vers des groupes inexistants (11,12,13,14,20,29,30,35)
+--   - Ces orphelins = 2 populations :
+--       (A) DECHET : codes GEN-FT-XX  -> a supprimer
+--       (B) VRAIS TYPES : codes numeriques / FT-ELxx -> a SAUVER
+--                          (Padoverhang, Bridging, Short Circuit...)
+--  Regle d'or : ne JAMAIS faire DELETE WHERE failure_group_id IN (...)
+--               -> ca tuerait les vrais types metier.
+-- =====================================================================
+
+
+-- #####################################################################
+-- ETAPE 0 - DIAGNOSTIC : isoler les orphelins et leur nature
+-- #####################################################################
+
+-- 0.1 - Tous les failure_types dont le groupe parent n'existe pas
+SELECT
+  ft.failure_type_id,
+  ft.failure_type_code,
+  ft.failure_type_desc,
+  ft.failure_group_id,
+  CASE
+    WHEN ft.failure_type_code LIKE 'GEN-%' THEN 'A_SUPPRIMER (genere)'
+    ELSE                                        'A_SAUVER (type metier reel)'
+  END AS verdict
+FROM staging.failure_types ft
+LEFT JOIN staging.failure_group_types fg ON ft.failure_group_id = fg.id
+WHERE fg.id IS NULL
+ORDER BY verdict, ft.failure_group_id, ft.failure_type_id;
+
+-- 0.2 - Compte par verdict
+SELECT
+  CASE WHEN ft.failure_type_code LIKE 'GEN-%'
+       THEN 'A_SUPPRIMER' ELSE 'A_SAUVER' END AS verdict,
+  count(*) AS nb
+FROM staging.failure_types ft
+LEFT JOIN staging.failure_group_types fg ON ft.failure_group_id = fg.id
+WHERE fg.id IS NULL
+GROUP BY 1;
+
+
+-- #####################################################################
+-- ETAPE 1 - SAUVEGARDE OBLIGATOIRE
+-- #####################################################################
+CREATE TABLE staging.failure_type_new AS
+SELECT * FROM staging.failure_types;
+SELECT count(*) AS nb_backup FROM staging.failure_type_new;
+
+
+-- #####################################################################
+-- ETAPE 2 - SUPPRIMER LE DECHET (population A : codes GEN- orphelins)
+-- #####################################################################
+-- On supprime SEULEMENT les orphelins generes, pas par group_id.
+DELETE FROM staging.failure_types ft
+USING (
+  SELECT ft2.failure_type_id
+  FROM staging.failure_types ft2
+  LEFT JOIN staging.failure_group_types fg ON ft2.failure_group_id = fg.id
+  WHERE fg.id IS NULL
+    AND ft2.failure_type_code LIKE 'GEN-%'
+) cible
+WHERE ft.failure_type_id = cible.failure_type_id;
+-- attendu : ~37 lignes supprimees
+
+
+-- #####################################################################
+-- ETAPE 3 - REAFFECTER LES VRAIS TYPES (population B) vers un bon groupe
+-- #####################################################################
+-- Apres l'etape 2, il reste ~12 vrais types orphelins.
+-- Re-verifier ce qui reste AVANT de reaffecter :
+SELECT ft.failure_type_id, ft.failure_type_code, ft.failure_type_desc,
+       ft.failure_group_id
+FROM staging.failure_types ft
+LEFT JOIN staging.failure_group_types fg ON ft.failure_group_id = fg.id
+WHERE fg.id IS NULL
+ORDER BY ft.failure_group_id;
+
+-- 3.1 - Reaffectation ligne par ligne (cibles a CONFIRMER selon ta logique
+--        metier ; ids cibles tires de failure_group_types reel).
+--        Groupes propres disponibles (rappel) :
+--          22 Solder Defects 1 | 23 Component Defe 2 | 24 PCB Defects 3
+--          25 Process Defect 4 | 26 Electrical Fai 5 | 27 Cosmetic Defec 6
+--          15 Solder Failure   | 16 Placement Failures
+--
+--   Short Circuit / Open Circuit / ESD Damage  -> 26 (Electrical)
+UPDATE staging.failure_types
+SET failure_group_id = 26
+WHERE failure_type_code IN ('FT-EL01','FT-EL02','FT-EL03');
+
+--   Flux Residue / Cosmetic Scratch            -> 27 (Cosmetic)
+UPDATE staging.failure_types
+SET failure_group_id = 27
+WHERE failure_type_code IN ('FT-CS01','FT-CS02');
+
+--   Short Shot (Incomplete fill) code 2001     -> 25 (Process) ?
+--   /!\ a confirmer : Molding existe aussi (group 2 'M')
+UPDATE staging.failure_types
+SET failure_group_id = 25
+WHERE failure_type_code = '2001'
+  AND failure_type_desc = 'Short Shot (Incomplete fill)';
+
+--   Padoverhang/Absence/Bridging/Foreign Material/BillBoarding
+--   (codes 700,800,900,1000,1600) = defauts de placement/solder.
+--   /!\ DECISION METIER : ces 5 types vont-ils vers Solder (22) ou
+--       Placement (16) ? A trancher AVANT d'executer ce bloc.
+-- UPDATE failure_types
+-- SET failure_group_id = 22            -- ou 16, selon ta nomenclature
+-- WHERE failure_type_code IN ('700','800','900','1000','1600');
+
+
+-- #####################################################################
+-- ETAPE 4 - VERIFICATION : plus aucun orphelin
+-- #####################################################################
+SELECT count(*) AS orphelins_restants
+FROM staging.failure_types ft
+LEFT JOIN staging.failure_group_types fg ON ft.failure_group_id = fg.id
+WHERE fg.id IS NULL;            -- objectif : 0
+
+-- Detail si > 0 (ce qui reste a arbitrer)
+/*SELECT ft.failure_type_id, ft.failure_type_code, ft.failure_type_desc,
+       ft.failure_group_id
+FROM failure_types ft
+LEFT JOIN failure_group_types fg ON ft.failure_group_id = fg.id
+WHERE fg.id IS NULL;*/
+
+
+-- #####################################################################
+-- ETAPE 5 - PREVENTION : empecher de futurs orphelins
+-- #####################################################################
+-- Une fois ZERO orphelin, poser la contrainte FK pour que la base
+-- refuse desormais tout failure_type sans groupe parent valide.
+ALTER TABLE staging.failure_types
+  ADD CONSTRAINT fk_failure_group
+  FOREIGN KEY (failure_group_id)
+  REFERENCES staging.failure_group_types (id);
+-- (optionnel) ON DELETE RESTRICT empeche de resupprimer un groupe
+-- encore reference.
+-- =====================================================================
+
+-- =====================================================================
+--  SUPPRESSION DEFINITIVE DES CLONES GEN-
+--  Constat prouve sur donnees reelles :
+--   - 69 lignes failure_types ont un code 'GEN-FT-XX-N'
+--   - desc = "Generated <NomDuVraiType> <N>"
+--   - Pour les 69, le <NomDuVraiType> EXISTE en version propre
+--     (non-GEN) ailleurs dans la table  -> 0 perte d'info metier
+--   - Les GEN- ne sont PAS tous orphelins (certains ont grp=9,15...)
+--     => on cible le PREFIXE 'GEN-', pas le statut orphelin.
+-- =====================================================================
+
+
+-- #####################################################################
+-- ETAPE 0 - PREUVE : chaque GEN- a bien un original propre
+-- #####################################################################
+-- Pour chaque clone GEN-, on extrait le nom de base depuis la desc
+-- ("Generated Solder Bridge 92" -> "Solder Bridge") et on verifie
+-- qu'un type non-GEN porte ce desc. Doit renvoyer 0 ligne "ORPHELIN".
+SELECT
+  g.failure_type_id,
+  g.failure_type_code,
+  g.failure_type_desc,
+  regexp_replace(g.failure_type_desc, '^Generated (.*) [0-9]+$', '\1') AS base_name,
+  CASE WHEN EXISTS (
+        SELECT 1 FROM staging.failure_types o
+        WHERE o.failure_type_code NOT LIKE 'GEN-%'
+          AND o.failure_type_desc =
+              regexp_replace(g.failure_type_desc,'^Generated (.*) [0-9]+$','\1')
+       )
+       THEN 'OK_original_present'
+       ELSE 'ORPHELIN_a_verifier'
+  END AS controle
+FROM staging.failure_types g
+WHERE g.failure_type_code LIKE 'GEN-%'
+ORDER BY controle, base_name;
+
+-- 0.1 - Resume : combien de clones, combien sans original
+SELECT
+  CASE WHEN EXISTS (
+        SELECT 1 FROM staging.failure_types o
+        WHERE o.failure_type_code NOT LIKE 'GEN-%'
+          AND o.failure_type_desc =
+              regexp_replace(g.failure_type_desc,'^Generated (.*) [0-9]+$','\1')
+       ) THEN 'OK_original_present' ELSE 'ORPHELIN' END AS controle,
+  count(*) AS nb
+FROM staging.failure_types g
+WHERE g.failure_type_code LIKE 'GEN-%'
+GROUP BY 1;
+-- attendu : OK_original_present = 69, ORPHELIN = 0
+
+
+-- #####################################################################
+-- ETAPE 1 - SAUVEGARDE OBLIGATOIRE
+-- #####################################################################
+CREATE TABLE failure_types_new AS
+SELECT * FROM staging.failure_types;
+SELECT count(*) AS nb_avant FROM failure_types_new;
+
+
+
+-- =====================================================================
+--  FK bookings.failed_id -> failure_types : que faire des clones GEN- ?
+--  Erreur rencontree :
+--   DELETE ... violates FK "bookings_failed_id_fkey"
+--   Key (failure_type_id)=(112) still referenced from "bookings"
+--  => On NE PEUT PAS supprimer un GEN- tant que bookings y pointe.
+-- =====================================================================
+ 
+
+
+CREATE TABLE staging.failure_types_backup AS
+SELECT * FROM staging.failure_types;
+
+CREATE TABLE staging.failure_group_types_backup AS
+SELECT * FROM staging.failure_group_types;
+
+
+UPDATE staging.failure_types
+SET
+    failure_type_desc = CASE
+        WHEN failure_type_code LIKE 'GEN-FT-SB-%' THEN 'Solder Bridge'
+        WHEN failure_type_code LIKE 'GEN-FT-IS-%' THEN 'Insufficient Solder'
+        WHEN failure_type_code LIKE 'GEN-FT-MC-%' THEN 'Missing Component'
+        WHEN failure_type_code LIKE 'GEN-FT-WC-%' THEN 'Wrong Component'
+        WHEN failure_type_code LIKE 'GEN-FT-SC-%' THEN 'Short Circuit'
+        WHEN failure_type_code LIKE 'GEN-FT-OC-%' THEN 'Open Circuit'
+        ELSE failure_type_desc
+    END,
+    updated_at = NOW()
+WHERE failure_type_code LIKE 'GEN-FT-%';
+
+UPDATE staging.failure_group_types
+SET
+    failure_group_name = CASE
+        WHEN failure_group_name LIKE 'GEN-Solder Defects-%' THEN 'Solder Defects'
+        WHEN failure_group_name LIKE 'GEN-Component Defects-%' THEN 'Component Defects'
+        WHEN failure_group_name LIKE 'GEN-PCB Defects-%' THEN 'PCB Defects'
+        WHEN failure_group_name LIKE 'GEN-Process Defects-%' THEN 'Process Defects'
+        WHEN failure_group_name LIKE 'GEN-Electrical Failures-%' THEN 'Electrical Failures'
+        WHEN failure_group_name LIKE 'GEN-Cosmetic Defects-%' THEN 'Cosmetic Defects'
+        ELSE failure_group_name
+    END,
+    failure_group_desc = CASE
+        WHEN failure_group_desc LIKE 'Generated solder defects%' THEN 'Solder defects'
+        WHEN failure_group_desc LIKE 'Generated component defects%' THEN 'Component defects'
+        WHEN failure_group_desc LIKE 'Generated PCB defects%' THEN 'PCB defects'
+        WHEN failure_group_desc LIKE 'Generated process defects%' THEN 'Process defects'
+        WHEN failure_group_desc LIKE 'Generated electrical failures%' THEN 'Electrical failures'
+        WHEN failure_group_desc LIKE 'Generated cosmetic defects%' THEN 'Cosmetic defects'
+        ELSE failure_group_desc
+    END,
+    updated_at = NOW()
+WHERE failure_group_name LIKE 'GEN-%'
+   OR failure_group_desc LIKE 'Generated%';
+
+SELECT failure_type_id, failure_type_code, failure_type_desc
+FROM staging.failure_types
+WHERE failure_type_code LIKE 'GEN-FT-%'
+ORDER BY failure_type_id;
+
+SELECT id, failure_group_name, failure_group_desc
+FROM staging.failure_group_types
+WHERE failure_group_name LIKE 'GEN-%'
+   OR failure_group_desc LIKE 'Generated%';
+
+select * from staging.failure_group_types fgt ;
+
+select * from staging.failure_types;
+ SELECT
+    failed_id,
+    COUNT(*) AS usage_count
+FROM staging.bookings
+WHERE failed_id IS NOT NULL
+GROUP BY failed_id
+ORDER BY failed_id;
+
+SELECT
+    b.failed_id,
+    ft.failure_type_code,
+    ft.failure_type_desc,
+    COUNT(*) AS usage_count
+FROM staging.bookings b
+LEFT JOIN staging.failure_types ft
+    ON b.failed_id = ft.failure_type_id
+WHERE b.failed_id IS NOT NULL
+GROUP BY
+    b.failed_id,
+    ft.failure_type_code,
+    ft.failure_type_desc
+ORDER BY usage_count DESC;
+
+
+SELECT
+    conname AS constraint_name,
+    contype AS constraint_type,
+    pg_get_constraintdef(c.oid) AS definition
+FROM pg_constraint c
+JOIN pg_class t
+    ON c.conrelid = t.oid
+JOIN pg_namespace n
+    ON n.oid = t.relnamespace
+WHERE t.relname = 'failure_types'
+  AND n.nspname = 'staging';
+
+BEGIN;
+
+UPDATE staging.failure_types
+SET
+    failure_type_code = CASE
+        WHEN failure_type_code LIKE 'GEN-FT-SB-%' THEN 'FT-SB'
+        WHEN failure_type_code LIKE 'GEN-FT-IS-%' THEN 'FT-IS'
+        WHEN failure_type_code LIKE 'GEN-FT-MC-%' THEN 'FT-MC'
+        WHEN failure_type_code LIKE 'GEN-FT-WC-%' THEN 'FT-WC'
+        WHEN failure_type_code LIKE 'GEN-FT-SC-%' THEN 'FT-SC'
+        WHEN failure_type_code LIKE 'GEN-FT-OC-%' THEN 'FT-OC'
+        ELSE failure_type_code
+    END,
+    failure_type_desc = CASE
+        WHEN failure_type_code LIKE 'GEN-FT-SB-%' THEN 'Solder Bridge'
+        WHEN failure_type_code LIKE 'GEN-FT-IS-%' THEN 'Insufficient Solder'
+        WHEN failure_type_code LIKE 'GEN-FT-MC-%' THEN 'Missing Component'
+        WHEN failure_type_code LIKE 'GEN-FT-WC-%' THEN 'Wrong Component'
+        WHEN failure_type_code LIKE 'GEN-FT-SC-%' THEN 'Short Circuit'
+        WHEN failure_type_code LIKE 'GEN-FT-OC-%' THEN 'Open Circuit'
+        ELSE failure_type_desc
+    END,
+    updated_at = NOW()
+WHERE failure_type_code LIKE 'GEN-FT-%';
+
+COMMIT;
+
+SELECT failure_type_id, failure_type_code, failure_type_desc, COUNT(*)
+FROM staging.failure_types where failure_type_desc='Insufficient Solder'
+GROUP BY failure_type_code, failure_type_desc, failure_type_id
+ORDER BY failure_type_code;
+
+select * from staging.failure_group_types  ;
+
+--where failure_type_desc='OCR/OCV'
+
+select * from staging.bookings where failed_id> 0;
+
+select * from failure_loss_diagnostic_kpi fldk ;
+
+/* nekhdmo b failure_type_desc */
+
+
+
+UPDATE public.pareto_losses_kpi p
+SET station_name = s.name
+FROM staging.stations s
+WHERE p.station_id = s.id;
+
+
+select * from staging.failure_types ;
+
+select * from staging.work_orders;
+
+UPDATE staging.bookings
+SET failed_id = 52
+WHERE failed_id = 31;
+
+
+CREATE OR REPLACE VIEW public.production_routing_overview AS
+SELECT
+    wo.id AS workorder_id,
+    wo.workorder_no,
+    wo.part_number,
+    wo.workorder_qty,
+    wo.status AS workorder_status,
+    wo.workorder_state,
+    wo.startdate,
+    wo.deliverydate,
+    wp.id AS workplan_id,
+    wp.workplan_desc,
+    wp.workplan_type,
+    wp.workplan_status,
+    wp.version AS workplan_version,
+    wp.is_current,
+    ws.id AS workstep_id,
+    ws.workstep_no,
+    ws.step,
+    ws.workstep_desc,
+    ws.erp_grp_no,
+    ws.erp_grp_desc,
+    ws.setup_time,
+    ws.te_person,
+    ws.te_machine,
+    ws.transport_time,
+    ws.wait_time,
+    ws.time_unit,
+    ws.step_type,
+    pm.description AS part_description,
+    pt.name AS part_type,
+    pg.name AS part_group,
+    pgt.name AS part_group_type
+FROM staging.work_orders wo
+LEFT JOIN staging.workplans wp
+    ON wo.part_number = wp.part_no
+LEFT JOIN staging.worksteps ws
+    ON wp.id = ws.workplan_id
+LEFT JOIN staging.part_master pm
+    ON wo.part_number = pm.part_number
+LEFT JOIN staging.part_types pt
+    ON pm.parttype_id = pt.id
+LEFT JOIN staging.part_groups pg
+    ON pm.partgroup_id = pg.id
+LEFT JOIN staging.part_group_types pgt
+    ON pg.part_group_type_id = pgt.id
+WHERE wp.is_current = true;
+
+select * from public.production_routing_overview;
