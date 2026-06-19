@@ -66,4 +66,4 @@ select * from public.iqr_results ir  ;
 select * from public.ma_results mr  ;
 select * from public.zscore_results zr  ;
 
-SELECT * FROM public.forecast_results LIMIT 5;
+SELECT * FROM public.forecast_results ;
